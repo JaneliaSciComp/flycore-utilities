@@ -245,7 +245,7 @@ def process_file(filename):
     if filehandle is not sys.stdin:
         filehandle.close()
     if ARG.WRITE:
-        conn['sage'].commit()
+        CONN['sage'].commit()
 
 
 if __name__ == '__main__':
