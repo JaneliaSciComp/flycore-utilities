@@ -60,11 +60,10 @@ def call_responder(server, endpoint):
     except requests.exceptions.RequestException as err:
         logger.critical(err)
         sys.exit(-1)
-    if req.status_code == 200:
-        return req.json()
-    else:
+    if req.status_code != 200:
         logger.error('Status: %s (%s)', str(req.status_code), url)
         sys.exit(-1)
+    return req.json()
 
 
 def initialize_program():
@@ -90,11 +89,10 @@ def call_doi(doi):
     except requests.exceptions.RequestException as err:
         logger.critical(err)
         sys.exit(-1)
-    if req.status_code == 200:
-        return req.json()
-    else:
+    if req.status_code != 200:
         logger.error('Status: %s (%s)', str(req.status_code), url)
         sys.exit(-1)
+    return req.json()
 
 
 def call_doi_with_retry(doi):
@@ -105,10 +103,9 @@ def call_doi_with_retry(doi):
         msg = call_doi(doi)
         if 'title' in msg['message'] and 'author' in msg['message']:
             return(msg)
-        else:
-            attempt -= 1
-            logger.warning("Missing data from crossref.org: retrying (%d)", attempt)
-            sleep(0.5)
+        attempt -= 1
+        logger.warning("Missing data from crossref.org: retrying (%d)", attempt)
+        sleep(0.5)
     logger.error("Incomplete data from crossref.org")
     return(msg)
 
@@ -129,6 +126,18 @@ def perform_backcheck(rdict):
                 logger.error("Could not delete DOI from doi_data")
                 sql_error(err)
             count['delete'] += 1
+
+
+def get_date(mesg):
+    if 'published-print' in mesg:
+        date = mesg['published-print']['date-parts'][0][0]
+    elif 'published-online' in mesg:
+        date = mesg['published-online']['date-parts'][0][0]
+    elif 'posted' in mesg:
+        date = mesg['posted']['date-parts'][0][0]
+    else:
+        date = 'unknown'
+    return(date)
 
 
 def update_dois():
@@ -152,14 +161,7 @@ def update_dois():
         else:
             logger.error("Missing author for %s (%s)", doi, title)
             continue
-        if 'published-print' in msg['message']:
-            date = msg['message']['published-print']['date-parts'][0][0]
-        elif 'published-online' in msg['message']:
-            date = msg['message']['published-online']['date-parts'][0][0]
-        elif 'posted' in msg['message']:
-            date = msg['message']['posted']['date-parts'][0][0]
-        else:
-            date = 'unknown'
+        date = get_date(msg['message'])
         ddict[doi] = msg['message']
         logger.info("%s: %s (%s, %s)", doi, title, author, date)
         title = unidecode(title)

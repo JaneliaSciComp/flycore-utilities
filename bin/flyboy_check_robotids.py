@@ -1,5 +1,4 @@
 import argparse
-import json
 import sys
 import colorlog
 import requests
@@ -17,7 +16,7 @@ CURSOR = dict()
 # Configuration
 CONFIG = {'config': {'url': 'http://config.int.janelia.org/'}}
 # General
-count = {'robot': 0, 'kp': 0, 'delete': 0}
+COUNT = {'robot': 0, 'kp': 0, 'delete': 0}
 
 
 def sql_error(err):
@@ -29,15 +28,15 @@ def sql_error(err):
     sys.exit(-1)
 
 
-def db_connect(db):
+def db_connect(dbc):
     """ Connect to specified database
         Keyword arguments:
         db: database key
     """
-    logger.info("Connecting to %s on %s", db['name'], db['host'])
+    logger.info("Connecting to %s on %s", dbc['name'], dbc['host'])
     try:
-        conn = MySQLdb.connect(host=db['host'], user=db['user'],
-                               passwd=db['password'], db=db['name'])
+        conn = MySQLdb.connect(host=dbc['host'], user=dbc['user'],
+                               passwd=dbc['password'], db=dbc['name'])
     except MySQLdb.Error as err:
         sql_error(err)
     try:
@@ -59,11 +58,10 @@ def call_responder(server, endpoint):
     except requests.exceptions.RequestException as err:
         logger.critical(err)
         sys.exit(-1)
-    if req.status_code == 200:
-        return req.json()
-    else:
+    if req.status_code != 200:
         logger.error('Status: %s', str(req.status_code))
         sys.exit(-1)
+    return req.json()
 
 
 def initialize_program():
@@ -87,8 +85,8 @@ def update_flyboy():
     except MySQLdb.Error as err:
         sql_error(err)
     for row in rows:
-        count['robot'] += 1
-        logger.debug(READ['ROBOT'] % (row[0]))
+        COUNT['robot'] += 1
+        logger.debug(READ['ROBOT'], row[0])
         try:
             CURSOR['flyboy'].execute(READ['ROBOT'], (str(row[0]),))
             fbrows = CURSOR['flyboy'].fetchall()
@@ -98,14 +96,14 @@ def update_flyboy():
             kpid = str(int(fbrow[1]))
             logger.debug('Robot ID %s (KP %s, stock name %s)' % (fbrow))
             resp = call_responder('flycore', '?request=linedata&kp=' + kpid)
-            count['kp'] += 1
+            COUNT['kp'] += 1
             if 'linedata' in resp and resp['linedata'] == '':
-                logger.warning('KP %s (Robot ID %s) is not in FLYF2' % (kpid, fbrow[0]))
-                logger.debug(WRITE['DELETE'] % (row[0]))
+                logger.warning('KP %s (Robot ID %s) is not in FLYF2', kpid, fbrow[0])
+                logger.debug(WRITE['DELETE'], row[0])
                 try:
                     CURSOR['flyboy'].execute(WRITE['DELETE'], (kpid,))
                     if CURSOR['flyboy'].rowcount:
-                        count['delete'] += 1
+                        COUNT['delete'] += 1
                     else:
                         logger.error("Could not delete KPID %s from StockFinder", kpid)
                 except MySQLdb.Error as err:
@@ -140,8 +138,8 @@ if __name__ == '__main__':
 
     initialize_program()
     update_flyboy()
-    print("Duplicate Robot IDs in StockFinder: %d" % count['robot'])
-    print("Associated KPIDs: %d" % count['kp'])
-    print("Deleted KPIDs: %d" % count['delete'])
+    print("Duplicate Robot IDs in StockFinder: %d" % COUNT['robot'])
+    print("Associated KPIDs: %d" % COUNT['kp'])
+    print("Deleted KPIDs: %d" % COUNT['delete'])
 
     sys.exit(0)
