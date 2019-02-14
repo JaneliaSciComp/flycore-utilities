@@ -177,7 +177,7 @@ def update_dois():
         CONN['flyboy'].commit()
         resp = requests.post(CONFIG['config']['url'] + 'importjson/dois',
                              {"config": json.dumps(ddict)})
-        if resp.status_code != requests.codes.ok:
+        if resp.status_code != requests.codes['ok']:
             logger.error(resp.json()['rest']['message'])
         else:
             rest = resp.json()
