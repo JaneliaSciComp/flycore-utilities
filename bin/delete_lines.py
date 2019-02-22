@@ -24,6 +24,7 @@ CURSOR = dict()
 
 # Configuration
 CONFIG = {'config': {'url': 'http://config.int.janelia.org/'}}
+COUNT = {"deleted": 0, "error": 0, "read": 0, "renamed": 0}
 
 
 def sql_error(err):
@@ -190,24 +191,30 @@ def process_line(line_id, line, newline):
         assays = row[1] if row[1] else 0
     if assays:
         logger.critical("Can't modify %s, is annotated: %s)" % (line, assays))
+        COUNT['error'] += 1
         return
     delete_publishing(line_id)
     if images:
         if not newline:
             logger.critical("Can't rename %s (%d images), new name is unknown" % (line, images))
+            COUNT['error'] += 1
         else:
             logger.debug("Will rename %s to %s" % (line, newline))
             rename_line(line_id, newline)
             logger.info("Renamed %s to %s" % (line, newline))
+            COUNT['renamed'] += 1
     else:
         if not newline:
             logger.debug("Will delete %s" % line)
             delete_line(line_id)
             logger.info("Deleted %s" % line)
+            COUNT['deleted'] += 1
         else:
             logger.debug("Will rename %s to %s" % (line, newline))
             rename_line(line_id, newline)
             logger.info("Renamed %s to %s" % (line, newline))
+            COUNT['renamed'] += 1
+
 
 def process_file(filename):
     if (not filename) and (not select.select([sys.stdin,],[],[],0.0)[0]):
@@ -221,12 +228,14 @@ def process_file(filename):
     for filerow in filehandle:
         filerow = filerow.rstrip()
         newline = ''
+        COUNT['read'] += 1
         if len(filerow.split("\t")) == 1:
             line = filerow
         else:
             [line, newline] = filerow.split("\t")
             if line == newline:
                 logger.critical("Line name and new line name match: %s", line)
+                COUNT['error'] += 1
                 continue
         logger.debug("Read %s" % line)
         try:
@@ -236,8 +245,10 @@ def process_file(filename):
         rows = CURSOR['sage'].fetchall()
         if len(rows) == 0:
             logger.warning("Line %s is not in SAGE" % line)
+            COUNT['error'] += 1
         elif len(rows) > 1:
             logger.critical("Line %s is in SAGE more than once" % line)
+            COUNT['error'] += 1
         else:
             line_id = rows[0][0]
             process_line(line_id, line, newline)
@@ -272,4 +283,8 @@ if __name__ == '__main__':
 
     initialize_program()
     process_file(ARG.FILE)
+    print("Lines read: %d" % COUNT['read'])
+    print("Lines deleted: %d" % COUNT['deleted'])
+    print("Lines renamed: %d" % COUNT['renamed'])
+    print("Errors: %d" % COUNT['error'])
     sys.exit(0)
