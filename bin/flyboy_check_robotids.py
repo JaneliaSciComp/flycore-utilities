@@ -1,3 +1,7 @@
+"""
+Remove duplicate Robot IDs from FlyBoy
+"""
+
 import argparse
 import sys
 import colorlog
@@ -22,9 +26,9 @@ COUNT = {'robot': 0, 'kp': 0, 'delete': 0}
 def sql_error(err):
     """ Log a critical SQL error and exit """
     try:
-        logger.critical('MySQL error [%d]: %s', err.args[0], err.args[1])
+        LOGGER.critical('MySQL error [%d]: %s', err.args[0], err.args[1])
     except IndexError:
-        logger.critical('MySQL error: %s', err)
+        LOGGER.critical('MySQL error: %s', err)
     sys.exit(-1)
 
 
@@ -33,7 +37,7 @@ def db_connect(dbc):
         Keyword arguments:
         db: database key
     """
-    logger.info("Connecting to %s on %s", dbc['name'], dbc['host'])
+    LOGGER.info("Connecting to %s on %s", dbc['name'], dbc['host'])
     try:
         conn = MySQLdb.connect(host=dbc['host'], user=dbc['user'],
                                passwd=dbc['password'], db=dbc['name'])
@@ -56,10 +60,10 @@ def call_responder(server, endpoint):
     try:
         req = requests.get(url)
     except requests.exceptions.RequestException as err:
-        logger.critical(err)
+        LOGGER.critical(err)
         sys.exit(-1)
     if req.status_code != 200:
-        logger.error('Status: %s', str(req.status_code))
+        LOGGER.error('Status: %s', str(req.status_code))
         sys.exit(-1)
     return req.json()
 
@@ -78,7 +82,7 @@ def initialize_program():
 def update_flyboy():
     """ Remove duplicate Robot IDs from StockFinder
     """
-    logger.info('Fetching duplicate Robot IDs from FlyBoy')
+    LOGGER.info('Fetching duplicate Robot IDs from FlyBoy')
     try:
         CURSOR['flyboy'].execute(READ['DUPLICATES'])
         rows = CURSOR['flyboy'].fetchall()
@@ -86,7 +90,7 @@ def update_flyboy():
         sql_error(err)
     for row in rows:
         COUNT['robot'] += 1
-        logger.debug(READ['ROBOT'], row[0])
+        LOGGER.debug(READ['ROBOT'], row[0])
         try:
             CURSOR['flyboy'].execute(READ['ROBOT'], (str(row[0]),))
             fbrows = CURSOR['flyboy'].fetchall()
@@ -94,18 +98,18 @@ def update_flyboy():
             sql_error(err)
         for fbrow in fbrows:
             kpid = str(int(fbrow[1]))
-            logger.debug('Robot ID %s (KP %s, stock name %s)' % (fbrow))
+            LOGGER.debug('Robot ID %s (KP %s, stock name %s)', fbrow[0], kpid, fbrow[2])
             resp = call_responder('flycore', '?request=linedata&kp=' + kpid)
             COUNT['kp'] += 1
             if 'linedata' in resp and resp['linedata'] == '':
-                logger.warning('KP %s (Robot ID %s) is not in FLYF2', kpid, fbrow[0])
-                logger.debug(WRITE['DELETE'], row[0])
+                LOGGER.warning('KP %s (Robot ID %s) is not in FLYF2', kpid, fbrow[0])
+                LOGGER.debug(WRITE['DELETE'], row[0])
                 try:
                     CURSOR['flyboy'].execute(WRITE['DELETE'], (kpid,))
                     if CURSOR['flyboy'].rowcount:
                         COUNT['delete'] += 1
                     else:
-                        logger.error("Could not delete KPID %s from StockFinder", kpid)
+                        LOGGER.error("Could not delete KPID %s from StockFinder", kpid)
                 except MySQLdb.Error as err:
                     sql_error(err)
     if ARG.WRITE:
@@ -125,16 +129,16 @@ if __name__ == '__main__':
                         default=False, help='Flag, Very chatty')
     ARG = PARSER.parse_args()
 
-    logger = colorlog.getLogger()
+    LOGGER = colorlog.getLogger()
     if ARG.DEBUG:
-        logger.setLevel(colorlog.colorlog.logging.DEBUG)
+        LOGGER.setLevel(colorlog.colorlog.logging.DEBUG)
     elif ARG.VERBOSE:
-        logger.setLevel(colorlog.colorlog.logging.INFO)
+        LOGGER.setLevel(colorlog.colorlog.logging.INFO)
     else:
-        logger.setLevel(colorlog.colorlog.logging.WARNING)
+        LOGGER.setLevel(colorlog.colorlog.logging.WARNING)
     HANDLER = colorlog.StreamHandler()
     HANDLER.setFormatter(colorlog.ColoredFormatter())
-    logger.addHandler(HANDLER)
+    LOGGER.addHandler(HANDLER)
 
     initialize_program()
     update_flyboy()
