@@ -60,11 +60,10 @@ def call_responder(server, endpoint):
     except requests.exceptions.RequestException as err:
         LOGGER.critical(err)
         sys.exit(-1)
-    if req.status_code == 200:
-        return req.json()
-    else:
+    if req.status_code != 200:
         LOGGER.error('Status: %s (%s)', str(req.status_code), url)
         sys.exit(-1)
+    return req.json()
 
 
 def initialize_program():
@@ -90,11 +89,10 @@ def call_doi(doi):
     except requests.exceptions.RequestException as err:
         LOGGER.critical(err)
         sys.exit(-1)
-    if req.status_code == 200:
-        return req.json()
-    else:
+    if req.status_code != 200:
         LOGGER.error('Status: %s (%s)', str(req.status_code), url)
         sys.exit(-1)
+    return req.json()
 
 
 def call_doi_with_retry(doi):
