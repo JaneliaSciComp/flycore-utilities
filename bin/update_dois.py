@@ -96,7 +96,6 @@ def call_doi(doi):
 
 
 def call_doi_with_retry(doi):
-    success = 0
     attempt = MAX_CROSSREF_TRIES
     msg = ''
     while attempt:
@@ -181,7 +180,7 @@ def update_dois():
             resp = requests.post(CONFIG['config']['url'] + 'importjson/dois/' + key,
                                  {"config": entry})
             if resp.status_code != requests.codes.ok:
-                LOGGER.error(str(resp))
+                LOGGER.error(resp.json()['rest']['message'])
             else:
                 rest = resp.json()
                 if 'inserted' in rest['rest']:
