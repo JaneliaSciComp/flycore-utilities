@@ -128,6 +128,17 @@ def perform_backcheck(rdict):
                 sql_error(err)
             COUNT['delete'] += 1
 
+def get_date(mesg):
+    if 'published-print' in mesg:
+        date = mesg['published-print']['date-parts'][0][0]
+    elif 'published-online' in mesg:
+        date = mesg['published-online']['date-parts'][0][0]
+    elif 'posted' in mesg:
+        date = mesg['posted']['date-parts'][0][0]
+    else:
+        date = 'unknown'
+    return date
+
 
 def update_dois():
     """ Sync DOIs in doi_data from StockFinder
@@ -150,14 +161,7 @@ def update_dois():
         else:
             LOGGER.error("Missing author for %s (%s)", doi, title)
             continue
-        if 'published-print' in msg['message']:
-            date = msg['message']['published-print']['date-parts'][0][0]
-        elif 'published-online' in msg['message']:
-            date = msg['message']['published-online']['date-parts'][0][0]
-        elif 'posted' in msg['message']:
-            date = msg['message']['posted']['date-parts'][0][0]
-        else:
-            date = 'unknown'
+        date = get_date(msg['message'])
         ddict[doi] = msg['message']
         LOGGER.info("%s: %s (%s, %s)", doi, title, author, date)
         title = unidecode(title)
