@@ -1,9 +1,9 @@
 import argparse
 import json
 import sys
+from time import sleep
 import colorlog
 import requests
-from time import sleep
 from unidecode import unidecode
 import MySQLdb
 
@@ -102,10 +102,9 @@ def call_doi_with_retry(doi):
         msg = call_doi(doi)
         if 'title' in msg['message'] and 'author' in msg['message']:
             return(msg)
-        else:
-            attempt -= 1
-            LOGGER.warning("Missing data from crossref.org: retrying (%d)", attempt)
-            sleep(0.5)
+        attempt -= 1
+        LOGGER.warning("Missing data from crossref.org: retrying (%d)", attempt)
+        sleep(0.5)
     LOGGER.error("Incomplete data from crossref.org")
     return(msg)
 
@@ -179,7 +178,7 @@ def update_dois():
             print("Updating %s in config database" % key)
             resp = requests.post(CONFIG['config']['url'] + 'importjson/dois/' + key,
                                  {"config": entry})
-            if resp.status_code != requests.codes.ok:
+            if resp.status_code != 200:
                 LOGGER.error(resp.json()['rest']['message'])
             else:
                 rest = resp.json()
