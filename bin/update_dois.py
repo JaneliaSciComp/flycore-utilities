@@ -1,3 +1,7 @@
+""" update_dois.py
+    Synchronize DOI information from FLYF2 to FlyBoy and the config system.
+"""
+
 import argparse
 import json
 import sys
@@ -9,7 +13,10 @@ import MySQLdb
 
 # Database
 READ = {'dois': "SELECT doi FROM doi_data",}
-WRITE = {'doi': "INSERT INTO doi_data (doi,title,first_author,publication_date) VALUES (%s,%s,%s,%s) ON DUPLICATE KEY UPDATE title=%s,first_author=%s,publication_date=%s",
+WRITE = {'doi': "INSERT INTO doi_data (doi,title,first_author,"
+                + "publication_date) VALUES (%s,%s,%s,%s) ON "
+                + "DUPLICATE KEY UPDATE title=%s,first_author=%s,"
+                + "publication_date=%s",
          'delete_doi': "DELETE FROM doi_data WHERE doi=%s",
         }
 CONN = dict()
@@ -30,15 +37,15 @@ def sql_error(err):
     sys.exit(-1)
 
 
-def db_connect(db):
+def db_connect(rdb):
     """ Connect to specified database
         Keyword arguments:
         db: database key
     """
-    LOGGER.info("Connecting to %s on %s", db['name'], db['host'])
+    LOGGER.info("Connecting to %s on %s", rdb['name'], rdb['host'])
     try:
-        conn = MySQLdb.connect(host=db['host'], user=db['user'],
-                               passwd=db['password'], db=db['name'])
+        conn = MySQLdb.connect(host=rdb['host'], user=rdb['user'],
+                               passwd=rdb['password'], db=rdb['name'])
     except MySQLdb.Error as err:
         sql_error(err)
     try:
@@ -69,6 +76,7 @@ def call_responder(server, endpoint):
 def initialize_program():
     """ Connect to FlyBoy database
     """
+    # pylint: disable=W0603
     global CONFIG
     dbc = call_responder('config', 'config/db_config')
     data = dbc['config']
@@ -96,20 +104,28 @@ def call_doi(doi):
 
 
 def call_doi_with_retry(doi):
+    """ Looping function for call_doi
+        Keyword arguments:
+        doi: DOI
+    """
     attempt = MAX_CROSSREF_TRIES
     msg = ''
     while attempt:
         msg = call_doi(doi)
         if 'title' in msg['message'] and 'author' in msg['message']:
-            return(msg)
+            return msg
         attempt -= 1
         LOGGER.warning("Missing data from crossref.org: retrying (%d)", attempt)
         sleep(0.5)
     LOGGER.error("Incomplete data from crossref.org")
-    return(msg)
+    return msg
 
 
 def perform_backcheck(rdict):
+    """ Check to see if we need to delete DOIs from FlyBoy
+        Keyword arguments:
+        rdict: dictionary of DOIs
+    """
     try:
         CURSOR['flyboy'].execute(READ['dois'])
     except MySQLdb.Error as err:
@@ -127,6 +143,10 @@ def perform_backcheck(rdict):
             COUNT['delete'] += 1
 
 def get_date(mesg):
+    """ Determine the publication date
+        Keyword arguments:
+        mesg: Crossref record
+    """
     if 'published-print' in mesg:
         date = mesg['published-print']['date-parts'][0][0]
     elif 'published-online' in mesg:

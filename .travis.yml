@@ -11,6 +11,6 @@ install:
 script: 
   - pylint --disable=C,W --unsafe-load-any-extension=yes delete_lines.py
   - pylint --disable=W --unsafe-load-any-extension=yes flyboy_check_robotids.py
-  - pylint --disable=C,W --unsafe-load-any-extension=yes update_dois.py
   - pylint --unsafe-load-any-extension=yes sync_flyf_initial_splits.py
   - pylint --unsafe-load-any-extension=yes sync_flyf_publishing_names.py
+  - pylint --unsafe-load-any-extension=yes update_dois.py
