@@ -146,6 +146,18 @@ def set_publishing_name(line, row):
     except MySQLdb.Error as err:
         sql_error(err)
 
+def process_single_name(stockmap, row):
+    """ Process a single publishing name """
+    if ARG.LINE and stockmap[row[0]] != ARG.LINE:
+        COUNT['skipped'] += 1
+    elif (not ARG.ALL) and (not row[3]): # Skip names with for_published=0
+        COUNT['skipped'] += 1
+    elif stockmap[row[0]] != row[2]:
+        line = stockmap[row[0]]
+        set_publishing_name(line, row)
+    else:
+        COUNT['skipped'] += 1
+
 
 def update_publishing_names():
     """ Get mapping of __kp_UniqueID to stock name """
@@ -171,15 +183,7 @@ def update_publishing_names():
                 COUNT['error'] += 1
                 LOGGER.error("%s has a publishing name with carriage returns", stockmap[row[0]])
                 continue
-            elif ARG.LINE and stockmap[row[0]] != ARG.LINE:
-                COUNT['skipped'] += 1
-            elif (not ARG.ALL) and (not row[3]): # Skip names with for_published=0
-                COUNT['skipped'] += 1
-            elif stockmap[row[0]] != row[2]:
-                line = stockmap[row[0]]
-                set_publishing_name(line, row)
-            else:
-                COUNT['skipped'] += 1
+            process_single_name(stockmap, row)
         else:
             COUNT['skipped'] += 1
     # Check for deletions
