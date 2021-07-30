@@ -7,6 +7,7 @@ import sys
 import colorlog
 import requests
 import MySQLdb
+from tqdm import tqdm
 
 # Database
 READ = {'EXISTS': "SELECT id FROM publishing_name WHERE line_id=%s AND publishing_name=%s",
@@ -136,7 +137,7 @@ def set_publishing_name(line, row):
         sql_error(err)
     COUNT['updated' if lrow else 'inserted'] += 1
     if not lrow:
-        LOGGER.info("Publishing name %s for %s", publishing_name, line)
+        LOGGER.info("New publishing name %s for %s", publishing_name, line)
     LOGGER.debug("Publishing name %s for %s", publishing_name, line)
     LOGGER.debug(WRITE['PUBLISHING'], line_id, *row[slice(1, 9)], default, *row[slice(2, 8)])
     try:
@@ -160,18 +161,25 @@ def update_publishing_names():
     response = call_responder('flycore', '?request=publishing_names')
     allnames = response['publishing']
     LOGGER.info("Found %d publishing names in Fly Core", len(allnames))
-    for row in allnames:
+    for row in tqdm(allnames):
         # _kf_parent_UID, __kp_name_serial_number, all_names, for_publishing,
         # published, label, who, notes, create_date
         COUNT['read'] += 1
         flycore_sn[row[1]] = 1
-        if row[0] in stockmap and ("\r" in row[2] or "\n" in row[2]):
-            COUNT['error'] += 1
-            LOGGER.error("%s has a publishing name with carriage returns", stockmap[row[0]])
-            continue
-        if row[0] in stockmap and stockmap[row[0]] != row[2]:
-            line = stockmap[row[0]]
-            set_publishing_name(line, row)
+        if row[0] in stockmap:
+            if ("\r" in row[2] or "\n" in row[2]):
+                COUNT['error'] += 1
+                LOGGER.error("%s has a publishing name with carriage returns", stockmap[row[0]])
+                continue
+            elif ARG.LINE and stockmap[row[0]] != ARG.LINE:
+                COUNT['skipped'] += 1
+            elif (not ARG.ALL) and (not row[3]): # Skip names with for_published=0
+                COUNT['skipped'] += 1
+            elif stockmap[row[0]] != row[2]:
+                line = stockmap[row[0]]
+                set_publishing_name(line, row)
+            else:
+                COUNT['skipped'] += 1
         else:
             COUNT['skipped'] += 1
     # Check for deletions
@@ -206,6 +214,8 @@ if __name__ == '__main__':
                         default='prod', help='Database manifold')
     PARSER.add_argument('--all', dest='ALL', action='store_true',
                         default=False, help='Process all lines')
+    PARSER.add_argument('--line', dest='LINE', action='store',
+                        help='Single line to process')
     PARSER.add_argument('--write', dest='WRITE', action='store_true',
                         default=False,
                         help='Flag, Actually modify database')
