@@ -16,12 +16,12 @@ READ = {'EXISTS': "SELECT id FROM publishing_name WHERE line_id=%s AND publishin
        }
 WRITE = {'DELETE': "DELETE FROM publishing_name WHERE id=%s",
          'PUBLISHING': "INSERT INTO publishing_name (line_id,source_id,"
-                       + "publishing_name,for_publishing,published,label,"
+                       + "publishing_name,for_publishing,published,label,display_genotype,"
                        + "requester,notes,source_create_date,preferred_name) "
-                       + "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON "
+                       + "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON "
                        + "DUPLICATE KEY UPDATE publishing_name=%s,"
                        + "for_publishing=%s,published=%s,label=%s,"
-                       + "requester=%s,notes=%s",
+                       + "display_genotype=%s,requester=%s,notes=%s",
         }
 CONN = dict()
 CURSOR = dict()
@@ -110,10 +110,10 @@ def get_line_id(line):
 
 def set_publishing_name(line, row):
     """ Fix column data """
-    for idx in range(3, 9):
+    for idx in range(3, 10):
         if row[idx] is None:
             row[idx] = ''
-    for idx in range(3, 6):
+    for idx in range(3, 7):
         if row[idx]:
             row[idx] = 1 if row[idx][0].lower() == 'y' else 0
         else:
@@ -139,10 +139,10 @@ def set_publishing_name(line, row):
     if not lrow:
         LOGGER.info("New publishing name %s for %s", publishing_name, line)
     LOGGER.debug("Publishing name %s for %s", publishing_name, line)
-    LOGGER.debug(WRITE['PUBLISHING'], line_id, *row[slice(1, 9)], default, *row[slice(2, 8)])
+    LOGGER.debug(WRITE['PUBLISHING'], line_id, *row[slice(1, 10)], default, *row[slice(2, 9)])
     try:
-        CURSOR['sage'].execute(WRITE['PUBLISHING'], (line_id, *row[slice(1, 9)], default,
-                                                     *row[slice(2, 8)],))
+        CURSOR['sage'].execute(WRITE['PUBLISHING'], (line_id, *row[slice(1, 10)], default,
+                                                     *row[slice(2, 9)],))
     except MySQLdb.Error as err:
         sql_error(err)
 
@@ -175,7 +175,7 @@ def update_publishing_names():
     LOGGER.info("Found %d publishing names in Fly Core", len(allnames))
     for row in tqdm(allnames):
         # _kf_parent_UID, __kp_name_serial_number, all_names, for_publishing,
-        # published, label, who, notes, create_date
+        # published, label, display_genotype, who, notes, create_date
         COUNT['read'] += 1
         flycore_sn[row[1]] = 1
         if row[0] in stockmap:
