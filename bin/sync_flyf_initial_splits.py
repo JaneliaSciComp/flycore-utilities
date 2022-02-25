@@ -261,7 +261,10 @@ def check_existing_line(line_id, split, split_half):
 def update_initial_splits():
     """ Synchronize ibitial split lines """
     LOGGER.info("Fetching initial splits from Fly Core")
-    splits = call_responder('flycore', '?request=initial_splits')
+    if ARG.LINE:
+        splits = call_responder('flycore', '?request=initial_split;line=' + ARG.LINE)
+    else:
+        splits = call_responder('flycore', '?request=initial_splits')
     LOGGER.info("Found %d initial splits in Fly Core", len(splits['splits']))
     for split in splits['splits']:
         try:
@@ -292,6 +295,8 @@ if __name__ == '__main__':
     PARSER = argparse.ArgumentParser(description="Sync initial split crosses from Fly Core to SAGE")
     PARSER.add_argument('--manifold', dest='MANIFOLD', action='store',
                         default='prod', help='Database manifold')
+    PARSER.add_argument('--line', dest='LINE', action='store',
+                        default='', help='Line')
     PARSER.add_argument('--all', dest='ALL', action='store_true',
                         default=False, help='Process all lines')
     PARSER.add_argument('--write', dest='WRITE', action='store_true',
