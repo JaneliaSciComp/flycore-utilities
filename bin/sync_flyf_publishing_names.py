@@ -129,6 +129,10 @@ def set_publishing_name(line, row):
     if re.search(r"IS\d+", short_line):
         short_line = short_line.replace('IS', 'SS')
     default = 1 if short_line == publishing_name else 0
+    if not row[1]:
+        LOGGER.error(f"Missing __kp_name_serial_number for _kf_parent_UID {row[0]} ({line})")
+        COUNT['error'] += 1
+        return
     # Is this an insertion?
     try:
         CURSOR['sage'].execute(READ['EXISTS'], (line_id, publishing_name))
@@ -144,7 +148,9 @@ def set_publishing_name(line, row):
         CURSOR['sage'].execute(WRITE['PUBLISHING'], (line_id, *row[slice(1, 10)], default,
                                                      *row[slice(2, 9)],))
     except MySQLdb.Error as err:
+        print(row)
         sql_error(err)
+
 
 def process_single_name(stockmap, row):
     """ Process a single publishing name """
