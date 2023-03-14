@@ -23,17 +23,17 @@ WRITE = {'DELETE': "DELETE FROM publishing_name WHERE id=%s",
                        + "for_publishing=%s,published=%s,label=%s,"
                        + "display_genotype=%s,requester=%s,notes=%s",
         }
-CONN = dict()
-CURSOR = dict()
+CONN = {}
+CURSOR = {}
 # Configuration
-CONFIG = {'config': {'url': 'http://config.int.janelia.org/'}}
+CONFIG = {'config': {'url': 'https://config.int.janelia.org/'}}
 # General
-COUNT = {'deleted': 0, 'error': 0, 'inserted': 0, 'no_sn': 0, 'not_stock': 0, 'read': 0, 'skipped': 0,
-         'updated': 0, 'publishing_name': 0, 'genotype': 0}
-LINE_ID = dict()
+COUNT = {'deleted': 0, 'error': 0, 'inserted': 0, 'no_sn': 0, 'not_stock': 0,
+         'read': 0, 'skipped': 0, 'updated': 0, 'publishing_name': 0, 'genotype': 0}
+LINE_ID = {}
 
+# pylint: disable=W0703,R1710
 
-# pylint: disable=W0703
 def sql_error(err):
     """ Log a critical SQL error and exit """
     try:
@@ -69,7 +69,7 @@ def call_responder(server, endpoint):
     """
     url = CONFIG[server]['url'] + endpoint
     try:
-        req = requests.get(url)
+        req = requests.get(url, timeout=10)
     except requests.exceptions.RequestException as err:
         LOGGER.critical(err)
         sys.exit(-1)
@@ -157,7 +157,8 @@ def process_single_name(stockmap, row):
     """ Process a single publishing name """
     if ARG.LINE and stockmap[row[0]] != ARG.LINE:
         COUNT['skipped'] += 1
-    elif (not ARG.ALL) and (not row[3]) and (not row[6]): # Skip names without for_publishing or display_genome
+    elif (not ARG.ALL) and (not row[3]) and (not row[6]):
+        # Skip names without for_publishing or display_genome
         COUNT['skipped'] += 1
     elif stockmap[row[0]] != row[2]:
         line = stockmap[row[0]]
@@ -168,22 +169,22 @@ def process_single_name(stockmap, row):
 
 def update_publishing_names():
     """ Get mapping of __kp_UniqueID to stock name """
-    stockmap = dict()
+    stockmap = {}
     LOGGER.info("Fetching stock names from Fly Core")
     stocks = call_responder('flycore', '?request=named_stocks')
     for stock in stocks['stocks']:
         stockmap[stock] = stocks['stocks'][stock]['Stock_Name']
-    if not len(stockmap):
+    if not stockmap:
         LOGGER.critical("No stocks found in FLYF2")
         sys.exit(-1)
     LOGGER.info("Found %d named stocks in Fly Core", len(stockmap))
     # Get publishing names
-    flycore_sn = dict()
+    flycore_sn = {}
     LOGGER.info("Fetching publishing names from Fly Core")
     response = call_responder('flycore', f"?request=publishing_names_sync;days={ARG.DAYS}")
     allnames = response['publishing']
     LOGGER.info("Found %d publishing names in Fly Core", len(allnames))
-    if not len(allnames):
+    if not allnames:
         LOGGER.critical("No new names found in FLYF2")
         sys.exit(-1)
     for row in tqdm(allnames):
@@ -200,7 +201,7 @@ def update_publishing_names():
         else:
             COUNT['not_stock'] += 1
     # Check for deletions
-    sage_source = dict()
+    sage_source = {}
     try:
         CURSOR['sage'].execute(READ['SOURCE'])
         rows = CURSOR['sage'].fetchall()
@@ -262,14 +263,14 @@ if __name__ == '__main__':
 
     initialize_program()
     update_publishing_names()
-    print("Names read:            %d" % COUNT['read'])
-    print("Publishing names:      %d" % COUNT['publishing_name'])
-    print("Genotypes:             %d" % COUNT['genotype'])
-    print("Names inserted:        %d" % COUNT['inserted'])
-    print("Names updated:         %d" % COUNT['updated'])
-    print("Names deleted:         %d" % COUNT['deleted'])
-    print("No stock:              %d" % COUNT['not_stock'])
-    print("Missing serial number: %d" % COUNT['no_sn'])
-    print("Names skipped:         %d" % COUNT['skipped'])
-    print("Names in error:        %d" % COUNT['error'])
+    print(f"Names read:            {COUNT['read']}")
+    print(f"Publishing names:      {COUNT['publishing_name']}")
+    print(f"Genotypes:             {COUNT['genotype']}")
+    print(f"Names inserted:        {COUNT['inserted']}")
+    print(f"Names updated:         {COUNT['updated']}")
+    print(f"Names deleted:         {COUNT['deleted']}")
+    print(f"No stock:              {COUNT['not_stock']}")
+    print(f"Missing serial number: {COUNT['no_sn']}")
+    print(f"Names skipped:         {COUNT['skipped']}")
+    print(f"Names in error:        {COUNT['error']}")
     sys.exit(0)
