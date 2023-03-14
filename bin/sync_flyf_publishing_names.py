@@ -28,8 +28,8 @@ CURSOR = dict()
 # Configuration
 CONFIG = {'config': {'url': 'http://config.int.janelia.org/'}}
 # General
-COUNT = {'deleted': 0, 'error': 0, 'inserted': 0, 'read': 0, 'skipped': 0,
-         'updated': 0}
+COUNT = {'deleted': 0, 'error': 0, 'inserted': 0, 'no_sn': 0, 'not_stock': 0, 'read': 0, 'skipped': 0,
+         'updated': 0, 'publishing_name': 0, 'genotype': 0}
 LINE_ID = dict()
 
 
@@ -130,9 +130,10 @@ def set_publishing_name(line, row):
         short_line = short_line.replace('IS', 'SS')
     default = 1 if short_line == publishing_name else 0
     if not row[1]:
-        LOGGER.error(f"Missing __kp_name_serial_number for _kf_parent_UID {row[0]} ({line})")
-        COUNT['error'] += 1
-        return
+        #LOGGER.error(f"Missing __kp_name_serial_number for _kf_parent_UID {row[0]} ({line})")
+        COUNT['no_sn'] += 1
+    utype = 'genotype' if row[6] else 'publishing_name'
+    COUNT[utype] += 1
     # Is this an insertion?
     try:
         CURSOR['sage'].execute(READ['EXISTS'], (line_id, publishing_name))
@@ -141,8 +142,8 @@ def set_publishing_name(line, row):
         sql_error(err)
     COUNT['updated' if lrow else 'inserted'] += 1
     if not lrow:
-        LOGGER.info("New publishing name %s for %s", publishing_name, line)
-    LOGGER.debug("Publishing name %s for %s", publishing_name, line)
+        LOGGER.info("New %s %s for %s", utype, publishing_name, line)
+    LOGGER.debug("%s %s for %s", utype, publishing_name, line)
     LOGGER.debug(WRITE['PUBLISHING'], line_id, *row[slice(1, 10)], default, *row[slice(2, 9)])
     try:
         CURSOR['sage'].execute(WRITE['PUBLISHING'], (line_id, *row[slice(1, 10)], default,
@@ -156,7 +157,7 @@ def process_single_name(stockmap, row):
     """ Process a single publishing name """
     if ARG.LINE and stockmap[row[0]] != ARG.LINE:
         COUNT['skipped'] += 1
-    elif (not ARG.ALL) and (not row[3]): # Skip names with for_published=0
+    elif (not ARG.ALL) and (not row[3]) and (not row[6]): # Skip names without for_publishing or display_genome
         COUNT['skipped'] += 1
     elif stockmap[row[0]] != row[2]:
         line = stockmap[row[0]]
@@ -172,13 +173,19 @@ def update_publishing_names():
     stocks = call_responder('flycore', '?request=named_stocks')
     for stock in stocks['stocks']:
         stockmap[stock] = stocks['stocks'][stock]['Stock_Name']
+    if not len(stockmap):
+        LOGGER.critical("No stocks found in FLYF2")
+        sys.exit(-1)
     LOGGER.info("Found %d named stocks in Fly Core", len(stockmap))
     # Get publishing names
     flycore_sn = dict()
     LOGGER.info("Fetching publishing names from Fly Core")
-    response = call_responder('flycore', '?request=publishing_names')
+    response = call_responder('flycore', f"?request=publishing_names_sync;days={ARG.DAYS}")
     allnames = response['publishing']
     LOGGER.info("Found %d publishing names in Fly Core", len(allnames))
+    if not len(allnames):
+        LOGGER.critical("No new names found in FLYF2")
+        sys.exit(-1)
     for row in tqdm(allnames):
         # _kf_parent_UID, __kp_name_serial_number, all_names, for_publishing,
         # published, label, display_genotype, who, notes, create_date
@@ -191,7 +198,7 @@ def update_publishing_names():
                 continue
             process_single_name(stockmap, row)
         else:
-            COUNT['skipped'] += 1
+            COUNT['not_stock'] += 1
     # Check for deletions
     sage_source = dict()
     try:
@@ -205,15 +212,16 @@ def update_publishing_names():
             sage_source[row[0]] = row[1]
     LOGGER.info("Found %d records in FLYF2", len(flycore_sn))
     LOGGER.info("Found %d records in SAGE", len(sage_source))
-    for pid in sage_source:
-        if pid not in flycore_sn:
-            LOGGER.warning("%s is present in SAGE but not in Fly Core", pid)
-            LOGGER.debug(WRITE['DELETE'], pid)
-            try:
-                CURSOR['sage'].execute(WRITE['DELETE'], (pid,))
-            except MySQLdb.Error as err:
-                sql_error(err)
-            COUNT['deleted'] += 1
+    #if ARG.DELETE:
+    #    for pid in sage_source:
+    #        if pid not in flycore_sn:
+    #            LOGGER.warning("%s is present in SAGE but not in Fly Core", pid)
+    #            LOGGER.debug(WRITE['DELETE'], pid)
+    #            try:
+    #                CURSOR['sage'].execute(WRITE['DELETE'], (pid,))
+    #            except MySQLdb.Error as err:
+    #                sql_error(err)
+    #            COUNT['deleted'] += 1
     if ARG.WRITE:
         CONN['sage'].commit()
 
@@ -224,8 +232,13 @@ if __name__ == '__main__':
                         default='prod', help='Database manifold')
     PARSER.add_argument('--all', dest='ALL', action='store_true',
                         default=False, help='Process all lines')
+    PARSER.add_argument('--days', dest='DAYS', action='store', type=int,
+                        default=2, help='Number of days to go back [2]')
     PARSER.add_argument('--line', dest='LINE', action='store',
                         help='Single line to process')
+    PARSER.add_argument('--delete', dest='DELETE', action='store_true',
+                        default=False,
+                        help='Flag, Delete items not in FLYF2 from SAGE')
     PARSER.add_argument('--write', dest='WRITE', action='store_true',
                         default=False,
                         help='Flag, Actually modify database')
@@ -236,22 +249,27 @@ if __name__ == '__main__':
     ARG = PARSER.parse_args()
 
     LOGGER = colorlog.getLogger()
+    ATTR = colorlog.colorlog.logging if "colorlog" in dir(colorlog) else colorlog
     if ARG.DEBUG:
-        LOGGER.setLevel(colorlog.colorlog.logging.DEBUG)
+        LOGGER.setLevel(ATTR.DEBUG)
     elif ARG.VERBOSE:
-        LOGGER.setLevel(colorlog.colorlog.logging.INFO)
+        LOGGER.setLevel(ATTR.INFO)
     else:
-        LOGGER.setLevel(colorlog.colorlog.logging.WARNING)
+        LOGGER.setLevel(ATTR.WARNING)
     HANDLER = colorlog.StreamHandler()
     HANDLER.setFormatter(colorlog.ColoredFormatter())
     LOGGER.addHandler(HANDLER)
 
     initialize_program()
     update_publishing_names()
-    print("Publishing names read:     %d" % COUNT['read'])
-    print("Publishing names inserted: %d" % COUNT['inserted'])
-    print("Publishing names updated:  %d" % COUNT['updated'])
-    print("Publishing names deleted:  %d" % COUNT['deleted'])
-    print("Publishing names skipped:  %d" % COUNT['skipped'])
-    print("Publishing names in error: %d" % COUNT['error'])
+    print("Names read:            %d" % COUNT['read'])
+    print("Publishing names:      %d" % COUNT['publishing_name'])
+    print("Genotypes:             %d" % COUNT['genotype'])
+    print("Names inserted:        %d" % COUNT['inserted'])
+    print("Names updated:         %d" % COUNT['updated'])
+    print("Names deleted:         %d" % COUNT['deleted'])
+    print("No stock:              %d" % COUNT['not_stock'])
+    print("Missing serial number: %d" % COUNT['no_sn'])
+    print("Names skipped:         %d" % COUNT['skipped'])
+    print("Names in error:        %d" % COUNT['error'])
     sys.exit(0)
