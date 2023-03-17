@@ -160,17 +160,15 @@ def error_condition(stockmap, row):
         COUNT['flags'] += 1
         WARNINGS.append(f"{row[0]} {row[2]} should be removed")
         return True
-    elif (not re.search(r"^w[;,\-\+\[]", row[2])) and row[6]:
-        COUNT['type'] += 1
-        WARNINGS.append(f"{row[0]} {row[2]} may be a publishing name but is flagged as a genotype")
-        return True
-    elif re.search(r"^w[;,\-\+\[]", row[2]) and not row[6]:
-        COUNT['type'] += 1
-        WARNINGS.append(f"{row[0]} {row[2]} may be a genotype but is flagged as a publishing name")
-        return True
     elif ARG.FILTER and not row[2].startswith(ARG.FILTER):
         COUNT['skipped'] += 1
         return True
+    elif (not re.search(r"^w[;,\-\+\[]", row[2])) and row[6]:
+        COUNT['type'] += 1
+        WARNINGS.append(f"{row[0]} {row[2]} may be a publishing name but is flagged as a genotype")
+    elif re.search(r"^w[;,\-\+\[]", row[2]) and not row[6]:
+        COUNT['type'] += 1
+        WARNINGS.append(f"{row[0]} {row[2]} may be a genotype but is flagged as a publishing name")
     return False
 
 
