@@ -152,23 +152,19 @@ def set_publishing_name(line, row):
 
 
 def error_condition(stockmap, row):
-    if (not row[3]) and (not row[6]):
-        # Skip names without for_publishing or display_genotype
+    if ARG.LINE and stockmap[row[0]] != ARG.LINE:
         COUNT['skipped'] += 1
         return True
-    elif ARG.LINE and stockmap[row[0]] != ARG.LINE:
-        COUNT['skipped'] += 1
-        return True
-    elif row[3] and row[6]:
-        # Skip names with for_publishing and display_genotype
+    elif not row[3]:
+        # Skip names with for_publishing is set to No
         COUNT['flags'] += 1
-        WARNINGS.append(f"{row[0]} {row[2]} has both type flags set")
+        WARNINGS.append(f"{row[0]} {row[2]} should be removed")
         return True
-    elif (not re.search(r"^w[;,-]", row[2])) and row[6]:
+    elif (not re.search(r"^w[;,\-\+\[]", row[2])) and row[6]:
         COUNT['type'] += 1
         WARNINGS.append(f"{row[0]} {row[2]} may be a publishing name but is flagged as a genotype")
         return True
-    elif re.search(r"^w[;,-]", row[2]) and row[3]:
+    elif re.search(r"^w[;,\-\+\[]", row[2]) and not row[6]:
         COUNT['type'] += 1
         WARNINGS.append(f"{row[0]} {row[2]} may be a genotype but is flagged as a publishing name")
         return True
