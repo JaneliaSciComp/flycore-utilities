@@ -247,7 +247,7 @@ if __name__ == '__main__':
     PARSER.add_argument('--manifold', dest='MANIFOLD', action='store',
                         default='prod', help='Database manifold')
     PARSER.add_argument('--days', dest='DAYS', action='store', type=int,
-                        default=2, help='Number of days to go back [2]')
+                        default=3, help='Number of days to go back [3]')
     PARSER.add_argument('--filter', dest='FILTER', action='store',
                         help='Publishing name filter (starts with)')
     PARSER.add_argument('--line', dest='LINE', action='store',
