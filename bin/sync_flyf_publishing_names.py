@@ -10,7 +10,8 @@ import MySQLdb
 from tqdm import tqdm
 
 # Database
-READ = {'EXISTS': "SELECT id FROM publishing_name WHERE line_id=%s AND publishing_name=%s",
+READ = {'STOCKS': "SELECT name,flycore_id FROM line_vw WHERE flycore_id IS NOT NULL",
+        'EXISTS': "SELECT id FROM publishing_name WHERE line_id=%s AND publishing_name=%s",
         'LINEID': "SELECT id FROM line WHERE name=%s",
         'SOURCE': "SELECT source_id,id,line FROM publishing_name_vw",
        }
@@ -70,7 +71,7 @@ def call_responder(server, endpoint):
     """
     url = CONFIG[server]['url'] + endpoint
     try:
-        req = requests.get(url, timeout=90)
+        req = requests.get(url, timeout=120)
     except requests.exceptions.RequestException as err:
         LOGGER.critical(err)
         sys.exit(-1)
@@ -187,12 +188,19 @@ def update_publishing_names():
     if not ARG.LINE:
         """ Get mapping of __kp_UniqueID to stock name """
         LOGGER.info("Fetching stock names from Fly Core")
-        stocks = call_responder('flycore', '?request=named_stocks')
-        for stock in stocks['stocks']:
-            stockmap[stock] = stocks['stocks'][stock]['Stock_Name']
-        if not stockmap:
-            LOGGER.critical("No stocks found in FLYF2")
-            sys.exit(-1)
+        #stocks = call_responder('flycore', '?request=named_stocks')
+        #if not stocks or not stocks['stocks']:
+        #    LOGGER.critical("No named stocks found in FLYF2")
+        #    sys.exit(-1)
+        #for stock in stocks['stocks']:
+        #    stockmap[stock] = stocks['stocks'][stock]['Stock_Name']
+        try:
+            CURSOR['sage'].execute(READ['STOCKS'])
+            rows = CURSOR['sage'].fetchall()
+        except MySQLdb.Error as err:
+            sql_error(err)
+        for row in rows:
+            stockmap[row[1]] = row[0]
         LOGGER.info("Found %d named stocks in Fly Core", len(stockmap))
     # Get publishing names
     flycore_sn = {}
@@ -204,8 +212,8 @@ def update_publishing_names():
     allnames = response['publishing']
     LOGGER.info("Found %d publishing names in Fly Core", len(allnames))
     if not allnames:
-        LOGGER.critical("No new names found in FLYF2")
-        sys.exit(-1)
+        LOGGER.warning("No new names found in FLYF2")
+        sys.exit(0)
     if ARG.LINE:
         stockmap[allnames[0][0]] = ARG.LINE
     for row in tqdm(allnames):
@@ -220,6 +228,7 @@ def update_publishing_names():
                 continue
             process_single_name(stockmap, row)
         else:
+            LOGGER.warning("%s is not a stock name", row[0])
             COUNT['not_stock'] += 1
     # Check for deletions
     sage_source = {}
