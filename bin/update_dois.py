@@ -185,7 +185,8 @@ def update_dois():
         title = unidecode(title)
         LOGGER.debug(WRITE['doi'], doi, title, author, date, title, author, date)
         try:
-            CURSOR['flyboy'].execute(WRITE['doi'], (doi, title, author, date, title, author, date))
+            CURSOR['flyboy'].execute(WRITE['doi'], (doi, title, author, date,
+                                                    title, author, date))
             COUNT['flyboy'] += 1
         except MySQLdb.Error as err:
             LOGGER.error("Could not update doi_data")
