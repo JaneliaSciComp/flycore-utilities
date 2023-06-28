@@ -161,8 +161,11 @@ def get_date(mesg):
 def update_dois():
     """ Sync DOIs in doi_data from StockFinder
     """
-    LOGGER.info('Fetching DOIs from FLYF2')
-    rows = call_responder('flycore', '?request=doilist')
+    if ARG.DOI:
+        rows = {"dois": [ARG.DOI]}
+    else:
+        LOGGER.info('Fetching DOIs from FLYF2')
+        rows = call_responder('flycore', '?request=doilist')
     rdict = {}
     ddict = {}
     for doi in rows['dois']:
@@ -191,7 +194,8 @@ def update_dois():
         except MySQLdb.Error as err:
             LOGGER.error("Could not update doi_data")
             sql_error(err)
-    perform_backcheck(rdict)
+    if not ARG.DOI:
+        perform_backcheck(rdict)
     if ARG.WRITE:
         CONN['flyboy'].commit()
         for key in ddict:
@@ -211,6 +215,8 @@ def update_dois():
 
 if __name__ == '__main__':
     PARSER = argparse.ArgumentParser(description="Sync DOIs within FlyBoy")
+    PARSER.add_argument('--doi', dest='DOI', action='store',
+                        help='Single DOI to insert/update')
     PARSER.add_argument('--manifold', dest='MANIFOLD', action='store',
                         default='prod', help='Database manifold')
     PARSER.add_argument('--write', dest='WRITE', action='store_true',
