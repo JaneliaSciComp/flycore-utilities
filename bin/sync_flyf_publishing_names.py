@@ -176,7 +176,7 @@ def error_condition(stockmap, row):
 def process_single_name(stockmap, row):
     """ Process a single publishing name """
     if not error_condition(stockmap, row):
-        if stockmap[row[0]] != row[2]:
+        if (stockmap[row[0]] != row[2]) or ARG.FORCE:
             line = stockmap[row[0]]
             set_publishing_name(line, row)
         else:
@@ -261,6 +261,8 @@ if __name__ == '__main__':
                         help='Publishing name filter (starts with)')
     PARSER.add_argument('--line', dest='LINE', action='store',
                         help='Single line to process')
+    PARSER.add_argument('--force', dest='FORCE', action='store_true',
+                        default=False, help='Force update')
     PARSER.add_argument('--write', dest='WRITE', action='store_true',
                         default=False,
                         help='Flag, Actually modify database')

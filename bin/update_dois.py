@@ -10,6 +10,7 @@ import colorlog
 import requests
 from unidecode import unidecode
 import MySQLdb
+from tqdm import tqdm
 
 # Database
 READ = {'dois': "SELECT doi FROM doi_data",}
@@ -19,8 +20,8 @@ WRITE = {'doi': "INSERT INTO doi_data (doi,title,first_author,"
                 + "publication_date=%s",
          'delete_doi': "DELETE FROM doi_data WHERE doi=%s",
         }
-CONN = dict()
-CURSOR = dict()
+CONN = {}
+CURSOR = {}
 # Configuration
 CONFIG = {'config': {'url': 'http://config.int.janelia.org/'}}
 MAX_CROSSREF_TRIES = 3
@@ -63,7 +64,7 @@ def call_responder(server, endpoint):
     """
     url = CONFIG[server]['url'] + endpoint
     try:
-        req = requests.get(url)
+        req = requests.get(url, timeout=10)
     except requests.exceptions.RequestException as err:
         LOGGER.critical(err)
         sys.exit(-1)
@@ -93,7 +94,7 @@ def call_doi(doi):
     url = 'https://api.crossref.org/works/' + doi
     headers = {'mailto': 'svirskasr@hhmi.org'}
     try:
-        req = requests.get(url, headers=headers)
+        req = requests.get(url, headers=headers, timeout=10)
     except requests.exceptions.RequestException as err:
         LOGGER.critical(err)
         sys.exit(-1)
@@ -103,22 +104,72 @@ def call_doi(doi):
     return req.json()
 
 
+def get_date(mesg):
+    """ Determine the publication date
+        Keyword arguments:
+        mesg: Crossref record
+    """
+    if 'published-print' in mesg:
+        date = mesg['published-print']['date-parts'][0][0]
+    elif 'published-online' in mesg:
+        date = mesg['published-online']['date-parts'][0][0]
+    elif 'posted' in mesg:
+        date = mesg['posted']['date-parts'][0][0]
+    else:
+        date = 'unknown'
+    return date
+
+
 def call_doi_with_retry(doi):
     """ Looping function for call_doi
         Keyword arguments:
-        doi: DOI
+          doi: DOI
+        Returns:
+          msg: response from crossref.org
+          title: publication title
+          author: publication first author surname
+          date: publication year
     """
     attempt = MAX_CROSSREF_TRIES
     msg = ''
     while attempt:
         msg = call_doi(doi)
         if 'title' in msg['message'] and 'author' in msg['message']:
-            return msg
+            break
         attempt -= 1
         LOGGER.warning("Missing data from crossref.org: retrying (%d)", attempt)
         sleep(0.5)
-    LOGGER.error("Incomplete data from crossref.org")
-    return msg
+    title = author = None
+    if 'title' in msg['message']:
+        title = msg['message']['title'][0]
+    if 'author' in msg['message']:
+        author = msg['message']['author'][0]['family']
+    date = get_date(msg['message'])
+    return msg, title, author, date
+
+
+def call_datacite(doi):
+    """ Get record from datacite
+        Keyword arguments:
+          doi: DOI
+        Returns:
+          msg: response from crossref.org
+          title: publication title
+          author: publication first author surname
+          date: publication year
+    """
+    rec = call_responder('datacite', doi)
+    title = author = None
+    msg = rec['data']['attributes']
+    if 'titles' in msg:
+        title = msg['titles'][0]['title']
+    if 'creators' in msg:
+        author = msg['creators'][0]['familyName']
+    if 'publicationYear' in msg:
+        date = str(msg['publicationYear'])
+    else:
+        date = 'unknown'
+    return rec, title, author, date
 
 
 def perform_backcheck(rdict):
@@ -142,21 +193,6 @@ def perform_backcheck(rdict):
                 sql_error(err)
             COUNT['delete'] += 1
 
-def get_date(mesg):
-    """ Determine the publication date
-        Keyword arguments:
-        mesg: Crossref record
-    """
-    if 'published-print' in mesg:
-        date = mesg['published-print']['date-parts'][0][0]
-    elif 'published-online' in mesg:
-        date = mesg['published-online']['date-parts'][0][0]
-    elif 'posted' in mesg:
-        date = mesg['posted']['date-parts'][0][0]
-    else:
-        date = 'unknown'
-    return date
-
 
 def update_dois():
     """ Sync DOIs in doi_data from StockFinder
@@ -168,23 +204,22 @@ def update_dois():
         rows = call_responder('flycore', '?request=doilist')
     rdict = {}
     ddict = {}
-    for doi in rows['dois']:
+    for doi in tqdm(rows['dois']):
         COUNT['found'] += 1
-        msg = call_doi_with_retry(doi)
-        rdict[doi] = 1
-        if 'title' in msg['message']:
-            title = msg['message']['title'][0]
+        if 'janelia' in doi:
+            msg, title, author, date = call_datacite(doi)
+            ddict[doi] = msg['data']['attributes']
         else:
+            msg, title, author, date = call_doi_with_retry(doi)
+            #ddict[doi] = msg['message']
+        rdict[doi] = 1
+        if not title:
             LOGGER.error("Missing title for %s", doi)
             continue
-        if 'author' in msg['message']:
-            author = msg['message']['author'][0]['family']
-        else:
+        if not author:
             LOGGER.error("Missing author for %s (%s)", doi, title)
             continue
-        date = get_date(msg['message'])
-        ddict[doi] = msg['message']
-        LOGGER.info("%s: %s (%s, %s)", doi, title, author, date)
+        LOGGER.debug("%s: %s (%s, %s)", doi, title, author, date)
         title = unidecode(title)
         LOGGER.debug(WRITE['doi'], doi, title, author, date, title, author, date)
         try:
@@ -202,7 +237,7 @@ def update_dois():
             entry = json.dumps(ddict[key])
             print("Updating %s in config database" % key)
             resp = requests.post(CONFIG['config']['url'] + 'importjson/dois/' + key,
-                                 {"config": entry})
+                                 {"config": entry}, timeout=10)
             if resp.status_code != 200:
                 LOGGER.error(resp.json()['rest']['message'])
             else:
