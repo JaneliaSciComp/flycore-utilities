@@ -211,7 +211,7 @@ def update_dois():
             ddict[doi] = msg['data']['attributes']
         else:
             msg, title, author, date = call_doi_with_retry(doi)
-            #ddict[doi] = msg['message']
+            ddict[doi] = msg['message']
         rdict[doi] = 1
         if not title:
             LOGGER.error("Missing title for %s", doi)
