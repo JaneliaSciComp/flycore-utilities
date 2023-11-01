@@ -221,6 +221,8 @@ def update_publishing_names():
         # published, label, display_genotype, who, notes, create_date
         COUNT['read'] += 1
         flycore_sn[row[1]] = 1
+        if not row[2]:
+            row[2] = ''
         if row[0] in stockmap:
             if ("\r" in row[2] or "\n" in row[2]):
                 COUNT['format'] += 1
