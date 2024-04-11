@@ -156,7 +156,7 @@ def error_condition(stockmap, row):
     if ARG.LINE and stockmap[row[0]] != ARG.LINE:
         COUNT['skipped'] += 1
         return True
-    elif not row[3]:
+    elif (not row[3]) and (not row[6]):
         # Skip names with for_publishing is set to No
         COUNT['flags'] += 1
         WARNINGS.append(f"{row[0]} {row[2]} should be removed")
@@ -175,6 +175,7 @@ def error_condition(stockmap, row):
 
 def process_single_name(stockmap, row):
     """ Process a single publishing name """
+    print(row)
     if not error_condition(stockmap, row):
         if (stockmap[row[0]] != row[2]) or ARG.FORCE:
             line = stockmap[row[0]]

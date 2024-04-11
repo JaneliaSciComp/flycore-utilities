@@ -100,7 +100,7 @@ def call_doi(doi):
         sys.exit(-1)
     if req.status_code != 200:
         LOGGER.error('Status: %s (%s)', str(req.status_code), url)
-        sys.exit(-1)
+        raise Exception(f"Status: {str(req.status_code)} ({url})")
     return req.json()
 
 
@@ -133,7 +133,10 @@ def call_doi_with_retry(doi):
     attempt = MAX_CROSSREF_TRIES
     msg = ''
     while attempt:
-        msg = call_doi(doi)
+        try:
+            msg = call_doi(doi)
+        except Exception as err:
+            raise Exception(err)
         if 'title' in msg['message'] and 'author' in msg['message']:
             break
         attempt -= 1
@@ -210,7 +213,11 @@ def update_dois():
             msg, title, author, date = call_datacite(doi)
             ddict[doi] = msg['data']['attributes']
         else:
-            msg, title, author, date = call_doi_with_retry(doi)
+            try:
+                msg, title, author, date = call_doi_with_retry(doi)
+            except Exception as err:
+                print(err)
+                continue
             ddict[doi] = msg['message']
         rdict[doi] = 1
         if not title:
