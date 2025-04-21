@@ -227,7 +227,7 @@ def update_publishing_names():
         if row[0] in stockmap:
             if ("\r" in row[2] or "\n" in row[2]):
                 COUNT['format'] += 1
-                LOGGER.error("%s has a publishing name with carriage returns", stockmap[row[0]])
+                LOGGER.error(f"{stockmap[row[0]]} has a publishing name with carriage returns ({row[2]})")
                 # stockmap[row[0]] = stockmap[row[0]].translate(dict.fromkeys(range(32), ""))
                 continue
             process_single_name(stockmap, row)
