@@ -4,13 +4,17 @@
 
 import argparse
 import json
+from operator import attrgetter
+import re
 import sys
 from time import sleep
-import colorlog
 import requests
 from unidecode import unidecode
 import MySQLdb
 from tqdm import tqdm
+import jrc_common.jrc_common as JRC
+
+# pylint: disable=broad-exception-caught,broad-exception-raised,logging-fstring-interpolation
 
 # Database
 READ = {'dois': "SELECT doi FROM doi_data",}
@@ -20,40 +24,27 @@ WRITE = {'doi': "INSERT INTO doi_data (doi,title,first_author,"
                 + "publication_date=%s",
          'delete_doi': "DELETE FROM doi_data WHERE doi=%s",
         }
-CONN = {}
-CURSOR = {}
+DB = {}
 # Configuration
-CONFIG = {'config': {'url': 'http://config.int.janelia.org/'}}
+CONFIG = {}
+ARG = LOGGER = None
 MAX_CROSSREF_TRIES = 3
 # General
 COUNT = {'delete': 0, 'found': 0, 'foundfb': 0, 'flyboy': 0, 'insert': 0, 'update': 0}
 
 
-def sql_error(err):
-    """ Log a critical SQL error and exit """
-    try:
-        LOGGER.critical('MySQL error [%d]: %s', err.args[0], err.args[1])
-    except IndexError:
-        LOGGER.critical('MySQL error: %s', err)
-    sys.exit(-1)
-
-
-def db_connect(rdb):
-    """ Connect to specified database
+def terminate_program(msg=None):
+    ''' Terminate the program gracefully
         Keyword arguments:
-        db: database key
-    """
-    LOGGER.info("Connecting to %s on %s", rdb['name'], rdb['host'])
-    try:
-        conn = MySQLdb.connect(host=rdb['host'], user=rdb['user'],
-                               passwd=rdb['password'], db=rdb['name'])
-    except MySQLdb.Error as err:
-        sql_error(err)
-    try:
-        cursor = conn.cursor()
-        return(conn, cursor)
-    except MySQLdb.Error as err:
-        sql_error(err)
+          msg: error message or object
+        Returns:
+          None
+    '''
+    if msg:
+        if not isinstance(msg, str):
+            msg = f"An exception of type {type(msg).__name__} occurred. Arguments:\n{msg.args}"
+        LOGGER.critical(msg)
+    sys.exit(-1 if msg else 0)
 
 
 def call_responder(server, endpoint):
@@ -66,24 +57,27 @@ def call_responder(server, endpoint):
     try:
         req = requests.get(url, timeout=10)
     except requests.exceptions.RequestException as err:
-        LOGGER.critical(err)
-        sys.exit(-1)
+        terminate_program(err)
     if req.status_code != 200:
-        LOGGER.error('Status: %s (%s)', str(req.status_code), url)
-        sys.exit(-1)
+        terminate_program(f"Status: {str(req.status_code)} ({url})")
     return req.json()
 
 
 def initialize_program():
     """ Connect to FlyBoy database
     """
-    # pylint: disable=W0603
-    global CONFIG
-    dbc = call_responder('config', 'config/db_config')
-    data = dbc['config']
-    (CONN['flyboy'], CURSOR['flyboy']) = db_connect(data['flyboy'][ARG.MANIFOLD])
-    dbc = call_responder('config', 'config/rest_services')
-    CONFIG = dbc['config']
+    try:
+        dbconfig = JRC.get_config("databases")
+    except Exception as err:
+        terminate_program(err)
+    dbs = ['flyboy']
+    for source in dbs:
+        dbo = attrgetter(f"{source}.{ARG.MANIFOLD}.write")(dbconfig)
+        LOGGER.info("Connecting to %s %s on %s as %s", dbo.name, ARG.MANIFOLD, dbo.host, dbo.user)
+        try:
+            DB[source] = JRC.connect_database(dbo)
+        except Exception as err:
+            terminate_program(err)
 
 
 def call_doi(doi):
@@ -96,11 +90,9 @@ def call_doi(doi):
     try:
         req = requests.get(url, headers=headers, timeout=10)
     except requests.exceptions.RequestException as err:
-        LOGGER.critical(err)
-        sys.exit(-1)
+        terminate_program(err)
     if req.status_code != 200:
-        LOGGER.error('Status: %s (%s)', str(req.status_code), url)
-        raise Exception(f"Status: {str(req.status_code)} ({url})")
+        terminate_program(f"Status: {str(req.status_code)} ({url})")
     return req.json()
 
 
@@ -136,7 +128,7 @@ def call_doi_with_retry(doi):
         try:
             msg = call_doi(doi)
         except Exception as err:
-            raise Exception(err)
+            raise Exception(err) from err
         if 'title' in msg['message'] and 'author' in msg['message']:
             break
         attempt -= 1
@@ -181,20 +173,88 @@ def perform_backcheck(rdict):
         rdict: dictionary of DOIs
     """
     try:
-        CURSOR['flyboy'].execute(READ['dois'])
+        DB['flyboy']['cursor'].execute(READ['dois'])
     except MySQLdb.Error as err:
-        sql_error(err)
-    rows = CURSOR['flyboy'].fetchall()
+        terminate_program(JRC.sql_error(err))
+    rows = DB['flyboy']['cursor'].fetchall()
     for row in rows:
         COUNT['foundfb'] += 1
-        if row[0] not in rdict:
-            LOGGER.warning(WRITE['delete_doi'], (row[0]))
+        if row['doi'] not in rdict:
+            LOGGER.warning(WRITE['delete_doi'], (row['doi']))
             try:
-                CURSOR['flyboy'].execute(WRITE['delete_doi'], (row[0],))
+                DB['flyboy']['cursor'].execute(WRITE['delete_doi'], (row['doi'],))
             except MySQLdb.Error as err:
-                LOGGER.error("Could not delete DOI from doi_data")
-                sql_error(err)
+                terminate_program(JRC.sql_error(err))
             COUNT['delete'] += 1
+
+
+def needs_update(doi, msg):
+    """ Check if the DOI needs to be updated
+        Keyword arguments:
+          doi: DOI
+          msg: message
+        Returns:
+          True if the DOI needs to be updated, False otherwise
+    """
+    if 'indexed' not in msg or 'timestamp' not in msg['indexed']:
+        return True
+    rec = call_responder('config', f"config/dois/{doi}")
+    if not rec:
+        return True
+    if 'config' not in rec or 'indexed' not in rec['config'] \
+       or 'timestamp' not in rec['config']['indexed']:
+        return True
+    return bool(rec['config']['indexed']['timestamp'] != msg['indexed']['timestamp'])
+
+
+def split_raw_doi(doi_string):
+    """ Split a raw DOI string into multiple DOIs
+        Keyword arguments:
+          doi: DOI
+        Returns:
+          dois: list of DOIs
+    """
+    return re.split(r"\s*\|\s*", doi_string)
+
+
+def process_single_doi(doi, rdict, ddict):
+    """ Process a single DOI
+        Keyword arguments:
+          doi: DOI
+          rdict: dictionary of DOIs
+          ddict: dictionary of DOIs
+        Returns:
+          None
+    """
+    COUNT['found'] += 1
+    if 'janelia' in doi:
+        msg, title, author, date = call_datacite(doi)
+        ddict[doi] = msg['data']['attributes']
+    else:
+        try:
+            msg, title, author, date = call_doi_with_retry(doi)
+        except Exception as err:
+            print(err)
+            return
+        if needs_update(doi, msg['message']):
+            ddict[doi] = msg['message']
+    rdict[doi] = 1
+    if not title:
+        LOGGER.error("Missing title for %s", doi)
+        return
+    if not author:
+        LOGGER.error("Missing author for %s (%s)", doi, title)
+        return
+    LOGGER.debug("%s: %s (%s, %s)", doi, title, author, date)
+    title = unidecode(title)
+    LOGGER.debug(WRITE['doi'], doi, title, author, date, title, author, date)
+    try:
+        DB['flyboy']['cursor'].execute(WRITE['doi'], (doi, title, author, date,
+                                                title, author, date))
+        COUNT['flyboy'] += 1
+    except MySQLdb.Error as err:
+        LOGGER.error("Could not update doi_data")
+        terminate_program(JRC.sql_error(err))
 
 
 def update_dois():
@@ -207,42 +267,18 @@ def update_dois():
         rows = call_responder('flycore', '?request=doilist')
     rdict = {}
     ddict = {}
-    for doi in tqdm(rows['dois']):
-        COUNT['found'] += 1
-        if 'janelia' in doi:
-            msg, title, author, date = call_datacite(doi)
-            ddict[doi] = msg['data']['attributes']
-        else:
-            try:
-                msg, title, author, date = call_doi_with_retry(doi)
-            except Exception as err:
-                print(err)
-                continue
-            ddict[doi] = msg['message']
-        rdict[doi] = 1
-        if not title:
-            LOGGER.error("Missing title for %s", doi)
-            continue
-        if not author:
-            LOGGER.error("Missing author for %s (%s)", doi, title)
-            continue
-        LOGGER.debug("%s: %s (%s, %s)", doi, title, author, date)
-        title = unidecode(title)
-        LOGGER.debug(WRITE['doi'], doi, title, author, date, title, author, date)
-        try:
-            CURSOR['flyboy'].execute(WRITE['doi'], (doi, title, author, date,
-                                                    title, author, date))
-            COUNT['flyboy'] += 1
-        except MySQLdb.Error as err:
-            LOGGER.error("Could not update doi_data")
-            sql_error(err)
+    for doi_string in tqdm(rows['dois'], desc='Process DOIs'):
+        dois = split_raw_doi(doi_string)
+        for doi in dois:
+            if 'in prep' not in doi:
+                process_single_doi(doi, rdict, ddict)
     if not ARG.DOI:
         perform_backcheck(rdict)
     if ARG.WRITE:
-        CONN['flyboy'].commit()
-        for key in ddict:
+        DB['flyboy']['conn'].commit()
+        for key in tqdm(ddict, desc='Update config'):
             entry = json.dumps(ddict[key])
-            print("Updating %s in config database" % key)
+            LOGGER.debug(f"Updating {key} in config database")
             resp = requests.post(CONFIG['config']['url'] + 'importjson/dois/' + key,
                                  {"config": entry}, timeout=10)
             if resp.status_code != 200:
@@ -269,26 +305,17 @@ if __name__ == '__main__':
     PARSER.add_argument('--debug', dest='DEBUG', action='store_true',
                         default=False, help='Flag, Very chatty')
     ARG = PARSER.parse_args()
-
-    LOGGER = colorlog.getLogger()
-    ATTR = colorlog.colorlog.logging if "colorlog" in dir(colorlog) else colorlog
-    if ARG.DEBUG:
-        LOGGER.setLevel(ATTR.DEBUG)
-    elif ARG.VERBOSE:
-        LOGGER.setLevel(ATTR.INFO)
-    else:
-        LOGGER.setLevel(ATTR.WARNING)
-    HANDLER = colorlog.StreamHandler()
-    HANDLER.setFormatter(colorlog.ColoredFormatter())
-    LOGGER.addHandler(HANDLER)
-
+    LOGGER = JRC.setup_logging(ARG)
+    try:
+        CONFIG = JRC.simplenamespace_to_dict(JRC.get_config("rest_services"))
+    except Exception as err:
+        terminate_program(err)
     initialize_program()
     update_dois()
-    print("DOIs found in StockFinder: %d" % COUNT['found'])
-    print("DOIs found in FlyBoy: %d" % COUNT['foundfb'])
-    print("DOIs inserted/updated in FlyBoy: %d" % COUNT['flyboy'])
-    print("DOIs deleted from FlyBoy: %d" % COUNT['delete'])
-    print("Documents inserted in config database: %d" % COUNT['insert'])
-    print("Documents updated in config database: %d" % COUNT['update'])
-
-    sys.exit(0)
+    print(f"DOIs found in StockFinder:             {COUNT['found']}")
+    print(f"DOIs found in FlyBoy:                  {COUNT['foundfb']}")
+    print(f"DOIs inserted/updated in FlyBoy:       {COUNT['flyboy']}")
+    print(f"DOIs deleted from FlyBoy:              {COUNT['delete']}")
+    print(f"Documents inserted in config database: {COUNT['insert']}")
+    print(f"Documents updated in config database:  {COUNT['update']}")
+    terminate_program()
