@@ -1,0 +1,22 @@
+pipeline { 
+agent { label 'docker-flycore' }
+
+  stages {
+    stage('Run') {
+      steps {
+        container('flycore') {
+          sh 'python3 /app/sync_flyf_publishing_names.py --verbose --days 4 --write'
+        }
+      }
+    }
+  }
+  post {
+    failure {
+      always {
+        mail to: 'svirskasr@hhmi.org',
+        subject: "Jenkins Build ${currentBuild.currentResult}: ${env.JOB_NAME}",
+        body:"${currentBuild.currentResult}: ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}"
+      }
+    }
+  }
+}

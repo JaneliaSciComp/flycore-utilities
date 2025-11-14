@@ -1,0 +1,33 @@
+pipeline { 
+  environment {
+    SAGEPASS = credentials("sageAdminPassword")
+  }
+    
+  agent { label 'docker-sage' }
+
+  stages {
+    stage('Run') {
+      steps {
+        container('sage') {
+          sh 'echo "Syncing updated lines"'    
+          sh 'echo "Line" >/tmp/lines.in'
+          sh 'python /app/bin/flycore_updated_lines.py --hours 6 --delay 2 >>/tmp/lines.in'
+          sh 'cat /tmp/lines.in'
+          sh 'perl /app/bin/sage_loader.pl -file /tmp/lines.in -config line_insert -module line -lab rubin -description "Automated sync of updated lines from FLYF2" -debug -user svirskasr'
+          sh 'echo "Syncing new lines"'    
+          sh 'echo "Line" >/tmp/lines.in'
+          sh 'perl /app/bin/find_new_flyf2_lines.pl | sort >>/tmp/lines.in'
+          sh 'cat /tmp/lines.in'
+          sh 'perl /app/bin/sage_loader.pl -file /tmp/lines.in -config line_insert -module line -lab rubin -description "Initial load of new fly lines from FLYF2" -debug -user svirskasr'
+        }
+      }
+    }
+  }
+  post {
+    failure {
+      mail to: 'svirskasr@hhmi.org',
+      subject: "Jenkins Build ${currentBuild.currentResult}: ${env.JOB_NAME}",
+      body:"${currentBuild.currentResult}: ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}"
+    }
+  }
+}

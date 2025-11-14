@@ -1,0 +1,21 @@
+pipeline { 
+agent { label 'docker-flycore' }
+
+  stages {
+    stage('Run') {
+      steps {
+        container('flycore') {
+          sh 'echo "Syncing initial splits"'
+          sh 'python3 /app/sync_flyf_initial_splits.py --verbose --write'
+        }
+      }
+    }
+  }
+  post {
+    failure {
+      mail to: 'svirskasr@hhmi.org',
+      subject: "Jenkins Build ${currentBuild.currentResult}: ${env.JOB_NAME}",
+      body:"${currentBuild.currentResult}: ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}"
+    }
+  }
+}
